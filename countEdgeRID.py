@@ -7,19 +7,19 @@ Run: $0 {<file>}+
 import sys
 
 
-class Rectrictions:
+class Restriction(object):
     def __init__(self, id):
         self.id = id
         self.starts = set()
         self.ends = set()
 
-    def add_start_seg(self, s: Record):
-        self.starts.add(s)
+    def add_start_seg(self, seg):
+        self.starts.add(seg)
 
-    def add_end_seg(self, s: Record):
-        self.ends.add(s)
+    def add_end_seg(self, seg):
+        self.ends.add(seg)
 
-class Vut:
+class Vut(object):
     def __init__(self, rec):
         i = 0
         self.code = rec[0]
@@ -31,7 +31,6 @@ class Vut:
         if self.is_cat_dim('1', 'B'):
             if self.str1.startswith('DatasetID/'):
                 self.str1 = self.str1[10:]
-            if self.str1 == 'EdgeID':
                 self.str2 = self.str2.replace('/', '')
                 print("Replaced EdgeID"+self.str2)
 
@@ -54,7 +53,7 @@ class Vut:
         return False if self.code is None else (self.code[1] == cat and self.code[2] == dim)
 
 
-class Record:
+class Segment(object):
     """
     Represents on line of S(egment) record
     """
@@ -78,7 +77,14 @@ class Record:
             if v.str1 == 'EdgeID':
                 return v.str2
 
-    def collect
+    def rids(self): # generator
+        for v in self.vut:
+            if v.is_cat_dim('7', 'B') and v.str1[1] in 'PRpr':
+                yield v
+            # elif v.is_cat_dim('5', 'B'):
+            #     yield v
+
+
 
 def process_a(line, rec):
     if rec[0] == "Countries":
@@ -89,10 +95,11 @@ def process_a(line, rec):
 def process_s(line, recs):
     if len(recs) < 5:
         print("S record < 5 fields")
-        return
+        return None
     if (len(recs) - 4) % 3 != 0:
         print("Record not multiple of 3: ")
-    return Record(line, recs)
+        return None
+    return Segment(line, recs)
 
 
 recordTypesMap = {'A': process_a, 'S': process_s}
@@ -101,17 +108,47 @@ recordTypesMap = {'A': process_a, 'S': process_s}
 def process_rmx(f):
     line = 0
     edges = {}
+    rmap = {}
+    print("Processing "+f)
     for l in open(f, "r"):
         line += 1
         type = l[0]
         recs = l.strip()[2:].split('|')[:-2]
         if type in recordTypesMap:
-            r = recordTypesMap[type].__call__(line, recs)
+            r = recordTypesMap[type](line, recs)
             if r is not None:
-                pass
+                e = r.get_edge_id()
+                rids = list(r.rids())
+                if e is not None and len(rids)>0:
+
+                    #add to dict by edge
+                    l = set(v.str2 for v in rids)
+                    if len(l) > 0:
+                        if e not in edges:
+                            edges[e] = l
+                        else:
+                            edges[e].update(l)
+
+                    # add to dict by rid
+                    for ri in l:
+                        if ri not in rmap:
+                            rmap[ri] = set(e)
+                        else:
+                            rmap[ri].add(e)
+                    #print("#{}: Edge {}, rids {}".format(line, r.get_edge_id(), ','.join(str(i) for i in rids) ))
+
+    print( "------------- BY EDGES ---------------")
+    for e in edges:
+        print("Edge "+e)
+        print('  '+','.join(str(i) for i in edges[e]))
+
+    print( "------------- BY RIDS ---------------")
+    for ri in rmap:
+        print("RID "+ri)
+        print('  '+','.join(rmap[ri]))
+
+    print("Total length = {}, size = {}".format(len(edges), sys.getsizeof(edges)))
     print( "File {} done, {} lines".format(f, line))
-
-
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2:
