@@ -1,3 +1,5 @@
+#! python
+
 """
 Count Restrictions ID on each edge.
 Prints out edgeID, total # of restrictions, and list restrictions ID for that edge.
@@ -5,7 +7,7 @@ Run: $0 {<file>}+
 """
 
 import sys
-
+import pprint
 
 class Restriction(object):
     def __init__(self, id):
@@ -19,9 +21,9 @@ class Restriction(object):
     def add_end_seg(self, seg):
         self.ends.add(seg)
 
+
 class Vut(object):
     def __init__(self, rec):
-        i = 0
         self.code = rec[0]
         self.str1 = rec[1]
         self.str2 = rec[2]
@@ -60,11 +62,15 @@ class Segment(object):
     def __init__(self, line, recs):
         self.vut = []
         self.line = line
+        self.r_begins = set() #begins
+        self.r_ends = set() #ends
+        self.r_conts = set() # continuations
         (self.lon1, self.lat1, self.lon2, self.lat2) = recs[:4]
         recs = recs[4:]
         while len(recs) > 0:
             self.vut.append(Vut(recs))
             recs = recs[3:]
+        self.collect_rids()
 
     def vut_num(self):
         return len(self.vut)
@@ -77,13 +83,33 @@ class Segment(object):
             if v.str1 == 'EdgeID':
                 return v.str2
 
-    def rids(self): # generator
+    def collect_rids(self):
+        for v in self.vut:
+            if v.is_cat_dim('7', 'B') and v.str1[1] in 'PRpr':
+                if v.str1[2] == 'B': # begin
+                    self.r_begins.add(v.str2)
+                elif v.str1[2] == 'E': #end
+                    self.r_ends.add(v.str2)
+                elif v.str1[2] == 'C': #continuation
+                    self.r_conts.add(v.str2)
+
+    def get_r_begins(self):
+        return self.r_begins
+
+    def get_r_ends(self):
+        return self.r_ends
+
+    def get_r_const(self):
+        return self.r_conts
+
+    def rids(self):   # generator
         for v in self.vut:
             if v.is_cat_dim('7', 'B') and v.str1[1] in 'PRpr':
                 yield v
             # elif v.is_cat_dim('5', 'B'):
             #     yield v
-
+    def __repr__(self):
+        return "Segment: EdgeID="+self.get_edge_id()+" B:"+repr(self.r_begins)+" E:"+repr(self.r_ends)
 
 
 def process_a(line, rec):
@@ -116,36 +142,42 @@ def process_rmx(f):
         recs = l.strip()[2:].split('|')[:-2]
         if type in recordTypesMap:
             r = recordTypesMap[type](line, recs)
-            if r is not None:
-                e = r.get_edge_id()
-                rids = list(r.rids())
-                if e is not None and len(rids)>0:
+            if r is None:
+                continue
+            e = r.get_edge_id()
+            if e is None:
+                continue
+            if e not in edges:
+                edges[e] = [set(),set()] # (begins, ends)
 
-                    #add to dict by edge
-                    l = set(v.str2 for v in rids)
-                    if len(l) > 0:
-                        if e not in edges:
-                            edges[e] = l
-                        else:
-                            edges[e].update(l)
+            rb = r.get_r_begins()
+            re = r.get_r_ends()
+            if len(rb) > 0:
+                edges[e][0].update(rb)
+            if len(re) > 0:
+                edges[e][1].update(re)
 
-                    # add to dict by rid
-                    for ri in l:
-                        if ri not in rmap:
-                            rmap[ri] = set(e)
-                        else:
-                            rmap[ri].add(e)
-                    #print("#{}: Edge {}, rids {}".format(line, r.get_edge_id(), ','.join(str(i) for i in rids) ))
+            # add to dict by rid begins
+            for ri in rb:
+                if ri not in rmap:
+                    rmap[ri] = [set(), set()]  # rid begins, rid ends
+                rmap[ri][0].add(e)
+            # add to dict by rid
+            for ri in re:
+                if ri not in rmap:
+                    rmap[ri] = [set(), set()]  # rid begins, rid ends
+                rmap[ri][1].add(e)
 
     print( "------------- BY EDGES ---------------")
-    for e in edges:
-        print("Edge "+e)
-        print('  '+','.join(str(i) for i in edges[e]))
+    for (e, v) in edges.items():
+        if len(v[0])>0 or len(v[1])>0:
+            print("Edge "+e)
+            print('   B: '+','.join(i for i in v[0])+', E: '+','.join(j for j in v[1]))
 
     print( "------------- BY RIDS ---------------")
-    for ri in rmap:
+    for (ri,v) in rmap.items():
         print("RID "+ri)
-        print('  '+','.join(rmap[ri]))
+        print('   B: ' + ','.join(i for i in v[0]) + ', E: ' + ','.join(j for j in v[1]))
 
     print("Total length = {}, size = {}".format(len(edges), sys.getsizeof(edges)))
     print( "File {} done, {} lines".format(f, line))
